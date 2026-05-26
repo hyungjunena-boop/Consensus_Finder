@@ -361,28 +361,37 @@ async function fetchSheetData() {
   return json.values || [];
 }
 
-// Yahoo Finance proxy로 현재가 조회
+// Yahoo Finance 현재가 조회 (CORS 프록시 경유)
 async function fetchCurrentPrice(ticker) {
   try {
-    // KRX:005930 → 005930.KS / KOSDAQ:035720 → 035720.KQ
-    const raw = ticker.replace("KRX:","").replace("KOSDAQ:","").replace("krx:","").replace("kosdaq:","");
+    const raw = ticker.replace(/krx:|kosdaq:/gi, "");
     const isKosdaq = ticker.toUpperCase().includes("KOSDAQ:");
     const yahooTicker = raw + (isKosdaq ? ".KQ" : ".KS");
+    const targetUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${yahooTicker}?interval=1d&range=1d`;
 
-    // Yahoo Finance v8 API (CORS 허용)
-    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${yahooTicker}?interval=1d&range=1d`;
-    const res = await fetch(url);
-    if (!res.ok) return null;
-    const json = await res.json();
-    const meta = json?.chart?.result?.[0]?.meta;
-    if (!meta) return null;
-    return {
-      current:   Math.round(meta.regularMarketPrice || 0),
-      prevClose: Math.round(meta.chartPreviousClose || meta.previousClose || 0),
-      change:    meta.regularMarketPrice && meta.chartPreviousClose
-        ? ((meta.regularMarketPrice - meta.chartPreviousClose) / meta.chartPreviousClose * 100).toFixed(2)
-        : null,
-    };
+    // CORS 프록시 순차 시도
+    const proxies = [
+      `https://corsproxy.io/?${encodeURIComponent(targetUrl)}`,
+      `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`,
+    ];
+
+    for (const proxyUrl of proxies) {
+      try {
+        const res = await fetch(proxyUrl);
+        if (!res.ok) continue;
+        const json = await res.json();
+        const meta = json?.chart?.result?.[0]?.meta;
+        if (!meta || !meta.regularMarketPrice) continue;
+        return {
+          current:   Math.round(meta.regularMarketPrice),
+          prevClose: Math.round(meta.chartPreviousClose || meta.previousClose || 0),
+          change:    meta.chartPreviousClose
+            ? ((meta.regularMarketPrice - meta.chartPreviousClose) / meta.chartPreviousClose * 100).toFixed(2)
+            : null,
+        };
+      } catch { continue; }
+    }
+    return null;
   } catch { return null; }
 }
 
