@@ -1,0 +1,548 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Consensus Finder</title>
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Noto+Sans+KR:wght@300;400;500;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg:       #080b12;
+      --surface:  #0e1420;
+      --border:   #1c2535;
+      --accent:   #00d4ff;
+      --accent2:  #7c3aed;
+      --up:       #00e676;
+      --down:     #ff5252;
+      --text:     #e2e8f0;
+      --muted:    #4a5568;
+      --card:     #111827;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: "Noto Sans KR", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+    }
+
+    /* ── 배경 그리드 효과 ── */
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      background-image:
+        linear-gradient(rgba(0,212,255,0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0,212,255,0.03) 1px, transparent 1px);
+      background-size: 40px 40px;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .wrap {
+      position: relative;
+      z-index: 1;
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 40px 20px 80px;
+    }
+
+    /* ── 헤더 ── */
+    .header {
+      margin-bottom: 48px;
+    }
+    .logo {
+      font-family: "Bebas Neue", sans-serif;
+      font-size: 3rem;
+      letter-spacing: 0.08em;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      line-height: 1;
+    }
+    .logo-sub {
+      font-size: 0.75rem;
+      color: var(--muted);
+      letter-spacing: 0.25em;
+      text-transform: uppercase;
+      margin-top: 4px;
+      font-weight: 300;
+    }
+
+    /* ── 검색창 ── */
+    .search-wrap {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 48px;
+    }
+    .search-input {
+      flex: 1;
+      padding: 14px 20px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      font-size: 1rem;
+      font-family: "Noto Sans KR", sans-serif;
+      outline: none;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    .search-input::placeholder { color: var(--muted); }
+    .search-input:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(0,212,255,0.1);
+    }
+    .search-btn {
+      padding: 14px 28px;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      border: none;
+      border-radius: 8px;
+      color: #fff;
+      font-size: 0.95rem;
+      font-weight: 700;
+      font-family: "Noto Sans KR", sans-serif;
+      cursor: pointer;
+      transition: opacity 0.2s, transform 0.1s;
+      white-space: nowrap;
+    }
+    .search-btn:hover { opacity: 0.9; }
+    .search-btn:active { transform: scale(0.98); }
+
+    /* ── 로딩 ── */
+    .loading {
+      display: none;
+      text-align: center;
+      padding: 60px 0;
+      color: var(--muted);
+    }
+    .spinner {
+      width: 36px; height: 36px;
+      border: 2px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin: 0 auto 16px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── 에러 ── */
+    .error {
+      display: none;
+      padding: 20px;
+      background: rgba(255,82,82,0.08);
+      border: 1px solid rgba(255,82,82,0.2);
+      border-radius: 8px;
+      color: var(--down);
+      font-size: 0.9rem;
+    }
+
+    /* ── 결과 ── */
+    .result { display: none; }
+
+    /* 종목 헤더 */
+    .stock-header {
+      padding: 24px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      margin-bottom: 20px;
+      position: relative;
+      overflow: hidden;
+    }
+    .stock-header::before {
+      content: "";
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 2px;
+      background: linear-gradient(90deg, var(--accent), var(--accent2));
+    }
+    .stock-name {
+      font-size: 1.6rem;
+      font-weight: 700;
+      color: #fff;
+    }
+    .stock-meta {
+      display: flex;
+      gap: 12px;
+      margin-top: 8px;
+      flex-wrap: wrap;
+    }
+    .tag {
+      font-size: 0.75rem;
+      padding: 3px 10px;
+      border-radius: 20px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--muted);
+      font-family: "JetBrains Mono", monospace;
+    }
+    .tag.sector { color: var(--accent); border-color: rgba(0,212,255,0.2); }
+
+    /* 요약 카드 */
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+    .summary-card {
+      padding: 20px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      text-align: center;
+    }
+    .summary-card .s-label {
+      font-size: 0.7rem;
+      color: var(--muted);
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+    .summary-card .s-value {
+      font-family: "JetBrains Mono", monospace;
+      font-size: 1.4rem;
+      font-weight: 600;
+    }
+    .summary-card.avg .s-value { color: var(--accent); }
+    .summary-card.high .s-value { color: var(--up); }
+    .summary-card.low .s-value { color: var(--down); }
+
+    /* 차트 */
+    .chart-card {
+      padding: 20px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      margin-bottom: 20px;
+    }
+    .section-label {
+      font-size: 0.7rem;
+      color: var(--muted);
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      margin-bottom: 16px;
+      font-weight: 500;
+    }
+
+    /* 테이블 */
+    .table-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+    }
+    .table-card table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    .table-card th {
+      padding: 12px 16px;
+      font-size: 0.7rem;
+      color: var(--muted);
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      text-align: left;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      font-weight: 500;
+    }
+    .table-card td {
+      padding: 13px 16px;
+      font-size: 0.88rem;
+      border-bottom: 1px solid rgba(28,37,53,0.6);
+    }
+    .table-card tr:last-child td { border-bottom: none; }
+    .table-card tr:hover td { background: rgba(255,255,255,0.02); }
+    .td-price {
+      font-family: "JetBrains Mono", monospace;
+      font-weight: 600;
+      color: #fff;
+    }
+    .td-date {
+      color: var(--muted);
+      font-family: "JetBrains Mono", monospace;
+      font-size: 0.8rem;
+    }
+    .opinion-badge {
+      display: inline-block;
+      font-size: 0.7rem;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-weight: 500;
+    }
+    .opinion-buy { background: rgba(0,230,118,0.1); color: var(--up); }
+    .opinion-neutral { background: rgba(74,85,104,0.3); color: var(--muted); }
+
+    /* 반응형 */
+    @media (max-width: 480px) {
+      .logo { font-size: 2.2rem; }
+      .summary-grid { grid-template-columns: repeat(3, 1fr); gap: 8px; }
+      .summary-card .s-value { font-size: 1.1rem; }
+      .search-btn { padding: 14px 18px; }
+    }
+  </style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="header">
+    <div class="logo">Consensus Finder</div>
+    <div class="logo-sub">증권사 목표가 컨센서스 · 최근 6개월</div>
+  </div>
+
+  <div class="search-wrap">
+    <input class="search-input" id="searchInput"
+      type="text" placeholder="종목명 또는 티커 입력  (예: 삼성전자, 005930)"
+      autocomplete="off" autocorrect="off" spellcheck="false">
+    <button class="search-btn" onclick="doSearch()">조회</button>
+  </div>
+
+  <div class="loading" id="loading">
+    <div class="spinner"></div>
+    <div>데이터 조회 중...</div>
+  </div>
+
+  <div class="error" id="error"></div>
+
+  <div class="result" id="result"></div>
+
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<script>
+// ── 설정 ───────────────────────────────────────
+const SHEET_ID  = "1yoB2xvgxb43lHj1_6WrLysT5fY8kiu7duLQLwyFosCI";
+const API_KEY   = "AIzaSyDi7rjRtXW5oL6gdOMF2qY0Yx_9MV8pu58";
+const RANGE     = "raw_data!A:K";
+// ───────────────────────────────────────────────
+
+let chartInstance = null;
+
+// 엔터키 검색
+document.getElementById("searchInput").addEventListener("keydown", e => {
+  if (e.key === "Enter") doSearch();
+});
+
+async function doSearch() {
+  const query = document.getElementById("searchInput").value.trim();
+  if (!query) return;
+
+  showLoading(true);
+  hideError();
+  hideResult();
+
+  try {
+    const data = await fetchSheetData();
+    const result = processData(data, query);
+    if (!result) {
+      showError(`"${query}"에 해당하는 종목을 찾을 수 없습니다.`);
+    } else {
+      renderResult(result);
+    }
+  } catch(e) {
+    showError("데이터 로드 실패: " + e.message);
+  } finally {
+    showLoading(false);
+  }
+}
+
+async function fetchSheetData() {
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${RANGE}?key=${API_KEY}`;
+  const res  = await fetch(url);
+  if (!res.ok) throw new Error(`API 오류 (${res.status})`);
+  const json = await res.json();
+  return json.values || [];
+}
+
+function processData(rows, query) {
+  if (rows.length < 2) return null;
+
+  const headers = rows[0];
+  const idx = {
+    date:   headers.indexOf("date"),
+    ticker: headers.indexOf("ticker"),
+    name:   headers.indexOf("name"),
+    sector: headers.indexOf("sector"),
+    broker: headers.indexOf("broker"),
+    target: headers.indexOf("target_price"),
+    opinion:headers.indexOf("opinion"),
+  };
+
+  // 6개월 cutoff
+  const cutoff = new Date();
+  cutoff.setMonth(cutoff.getMonth() - 6);
+
+  const q = query.toLowerCase();
+
+  const matched = rows.slice(1).filter(r => {
+    const name   = (r[idx.name]   || "").toLowerCase();
+    const ticker = (r[idx.ticker] || "").toLowerCase().replace(/krx:|kosdaq:/g,"");
+    if (!name.includes(q) && !ticker.includes(q)) return false;
+    try {
+      const ds = (r[idx.date] || "").replace(/\./g,"-");
+      const d  = new Date(ds.length <= 8 ? `20${ds}` : ds);
+      return d >= cutoff;
+    } catch { return true; }
+  });
+
+  if (!matched.length) return null;
+
+  const stockName   = matched[0][idx.name]   || "";
+  const stockTicker = matched[0][idx.ticker] || "";
+  const stockSector = matched[0][idx.sector] || "";
+
+  // 증권사별 최신 목표가
+  const brokerMap = {};
+  matched.forEach(r => {
+    const broker = r[idx.broker] || "";
+    const date   = r[idx.date]   || "";
+    const price  = Number(r[idx.target]) || 0;
+    if (!price) return;
+    if (!brokerMap[broker] || date > brokerMap[broker].date) {
+      brokerMap[broker] = { date, price, opinion: r[idx.opinion] || "" };
+    }
+  });
+
+  const brokers = Object.entries(brokerMap)
+    .sort((a,b) => b[1].date.localeCompare(a[1].date));
+
+  const prices = brokers.map(([,v]) => v.price);
+  const avg = prices.length ? Math.round(prices.reduce((a,b)=>a+b,0)/prices.length) : 0;
+  const max = prices.length ? Math.max(...prices) : 0;
+  const min = prices.length ? Math.min(...prices) : 0;
+
+  // 추이 데이터
+  const trend = matched
+    .filter(r => Number(r[idx.target]) > 0)
+    .map(r => ({ date: r[idx.date]||"", price: Number(r[idx.target]), broker: r[idx.broker]||"" }))
+    .sort((a,b) => a.date.localeCompare(b.date));
+
+  return { name: stockName, ticker: stockTicker, sector: stockSector,
+           count: matched.length, brokers, avg, max, min, trend };
+}
+
+function renderResult(d) {
+  const el = document.getElementById("result");
+
+  const brokerRows = d.brokers.map(([broker, v]) => {
+    const op = v.opinion && v.opinion !== "N/A" ? v.opinion : "";
+    const opHtml = op
+      ? `<span class="opinion-badge ${op.includes('매수')||op.includes('Buy') ? 'opinion-buy':'opinion-neutral'}">${op}</span>`
+      : `<span style="color:var(--muted)">-</span>`;
+    return `<tr>
+      <td>${broker}</td>
+      <td class="td-price">${v.price.toLocaleString()}원</td>
+      <td class="td-date">${v.date}</td>
+      <td>${opHtml}</td>
+    </tr>`;
+  }).join("");
+
+  el.innerHTML = `
+    <div class="stock-header">
+      <div class="stock-name">${d.name}</div>
+      <div class="stock-meta">
+        <span class="tag">${d.ticker}</span>
+        <span class="tag sector">${d.sector}</span>
+        <span class="tag">리포트 ${d.count}건</span>
+      </div>
+    </div>
+
+    <div class="summary-grid">
+      <div class="summary-card avg">
+        <div class="s-label">컨센서스 평균</div>
+        <div class="s-value">${d.avg.toLocaleString()}</div>
+      </div>
+      <div class="summary-card high">
+        <div class="s-label">최고 목표가</div>
+        <div class="s-value">${d.max.toLocaleString()}</div>
+      </div>
+      <div class="summary-card low">
+        <div class="s-label">최저 목표가</div>
+        <div class="s-value">${d.min.toLocaleString()}</div>
+      </div>
+    </div>
+
+    <div class="chart-card">
+      <div class="section-label">목표가 추이</div>
+      <canvas id="trendChart" height="90"></canvas>
+    </div>
+
+    <div class="table-card">
+      <table>
+        <thead>
+          <tr>
+            <th>증권사</th><th>최신 목표가</th><th>날짜</th><th>투자의견</th>
+          </tr>
+        </thead>
+        <tbody>${brokerRows}</tbody>
+      </table>
+    </div>
+  `;
+
+  el.style.display = "block";
+
+  // 차트
+  if (chartInstance) { chartInstance.destroy(); chartInstance = null; }
+  const ctx = document.getElementById("trendChart").getContext("2d");
+  chartInstance = new Chart(ctx, {
+    type: "line",
+    data: {
+      labels: d.trend.map(t => t.date),
+      datasets: [{
+        data: d.trend.map(t => t.price),
+        borderColor: "#00d4ff",
+        backgroundColor: "rgba(0,212,255,0.06)",
+        borderWidth: 2,
+        pointRadius: 3,
+        pointBackgroundColor: "#00d4ff",
+        fill: true,
+        tension: 0.3,
+      }]
+    },
+    options: {
+      responsive: true,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: { label: c => c.raw.toLocaleString() + "원" }
+        }
+      },
+      scales: {
+        x: {
+          ticks: { color: "#4a5568", maxTicksLimit: 7, font: { size: 11 } },
+          grid:  { color: "rgba(28,37,53,0.8)" }
+        },
+        y: {
+          ticks: {
+            color: "#4a5568",
+            font: { size: 11 },
+            callback: v => v.toLocaleString()
+          },
+          grid: { color: "rgba(28,37,53,0.8)" }
+        }
+      }
+    }
+  });
+}
+
+function showLoading(v) {
+  document.getElementById("loading").style.display = v ? "block" : "none";
+}
+function showError(msg) {
+  const el = document.getElementById("error");
+  el.textContent = msg;
+  el.style.display = "block";
+}
+function hideError() {
+  document.getElementById("error").style.display = "none";
+}
+function hideResult() {
+  document.getElementById("result").style.display = "none";
+}
+</script>
+</body>
+</html>
