@@ -341,6 +341,9 @@ async function doSearch() {
     if (!result) {
       showError(`"${query}"에 해당하는 종목을 찾을 수 없습니다.`);
     } else {
+      // 현재가 조회 (Yahoo Finance)
+      const price = await fetchCurrentPrice(result.ticker);
+      result.currentPrice = price;
       renderResult(result);
     }
   } catch(e) {
@@ -356,6 +359,31 @@ async function fetchSheetData() {
   if (!res.ok) throw new Error(`API 오류 (${res.status})`);
   const json = await res.json();
   return json.values || [];
+}
+
+// Yahoo Finance proxy로 현재가 조회
+async function fetchCurrentPrice(ticker) {
+  try {
+    // KRX:005930 → 005930.KS / KOSDAQ:035720 → 035720.KQ
+    const raw = ticker.replace("KRX:","").replace("KOSDAQ:","").replace("krx:","").replace("kosdaq:","");
+    const isKosdaq = ticker.toUpperCase().includes("KOSDAQ:");
+    const yahooTicker = raw + (isKosdaq ? ".KQ" : ".KS");
+
+    // Yahoo Finance v8 API (CORS 허용)
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${yahooTicker}?interval=1d&range=1d`;
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const json = await res.json();
+    const meta = json?.chart?.result?.[0]?.meta;
+    if (!meta) return null;
+    return {
+      current:   Math.round(meta.regularMarketPrice || 0),
+      prevClose: Math.round(meta.chartPreviousClose || meta.previousClose || 0),
+      change:    meta.regularMarketPrice && meta.chartPreviousClose
+        ? ((meta.regularMarketPrice - meta.chartPreviousClose) / meta.chartPreviousClose * 100).toFixed(2)
+        : null,
+    };
+  } catch { return null; }
 }
 
 function processData(rows, query) {
@@ -441,6 +469,34 @@ function renderResult(d) {
     </tr>`;
   }).join("");
 
+  // 현재가 카드 HTML
+  let priceCardHtml = "";
+  let gapCardHtml   = "";
+  if (d.currentPrice && d.currentPrice.current > 0) {
+    const cp      = d.currentPrice;
+    const chgSign = cp.change >= 0 ? "+" : "";
+    const chgColor= cp.change >= 0 ? "var(--up)" : "var(--down)";
+    priceCardHtml = `
+      <div class="summary-card" style="border-color:rgba(255,255,255,0.08)">
+        <div class="s-label">현재가</div>
+        <div class="s-value" style="color:#fff;font-size:1.1rem">${cp.current.toLocaleString()}</div>
+        <div style="font-size:0.75rem;color:${chgColor};margin-top:4px;font-family:'JetBrains Mono',monospace">
+          ${chgSign}${cp.change}%
+        </div>
+      </div>`;
+    if (d.avg > 0) {
+      const gap     = ((d.avg - cp.current) / cp.current * 100).toFixed(1);
+      const gapSign = gap >= 0 ? "+" : "";
+      const gapColor= gap >= 0 ? "var(--up)" : "var(--down)";
+      gapCardHtml = `
+        <div class="summary-card" style="border-color:rgba(255,255,255,0.08)">
+          <div class="s-label">평균 괴리율</div>
+          <div class="s-value" style="color:${gapColor}">${gapSign}${gap}%</div>
+          <div style="font-size:0.72rem;color:var(--muted);margin-top:4px">현재가 대비</div>
+        </div>`;
+    }
+  }
+
   el.innerHTML = `
     <div class="stock-header">
       <div class="stock-name">${d.name}</div>
@@ -451,7 +507,7 @@ function renderResult(d) {
       </div>
     </div>
 
-    <div class="summary-grid">
+    <div class="summary-grid" style="grid-template-columns:repeat(${d.currentPrice ? 5 : 3},1fr)">
       <div class="summary-card avg">
         <div class="s-label">컨센서스 평균</div>
         <div class="s-value">${d.avg.toLocaleString()}</div>
@@ -464,6 +520,8 @@ function renderResult(d) {
         <div class="s-label">최저 목표가</div>
         <div class="s-value">${d.min.toLocaleString()}</div>
       </div>
+      ${priceCardHtml}
+      ${gapCardHtml}
     </div>
 
     <div class="chart-card">
