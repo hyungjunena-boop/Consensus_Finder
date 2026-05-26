@@ -313,11 +313,12 @@
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<script src="config.js"></script>
 <script>
-// ── 설정 ───────────────────────────────────────
-const SHEET_ID  = "1yoB2xvgxb43lHj1_6WrLysT5fY8kiu7duLQLwyFosCI";
-const API_KEY   = "AIzaSyDi7rjRtXW5oL6gdOMF2qY0Yx_9MV8pu58";
-const RANGE     = "raw_data!A:K";
+// ── 설정 (config.js에서 로드) ──────────────────
+const SHEET_ID = CONFIG.SHEET_ID;
+const API_KEY  = CONFIG.API_KEY;
+const RANGE    = CONFIG.RANGE;
 // ───────────────────────────────────────────────
 
 let chartInstance = null;
@@ -447,8 +448,44 @@ function processData(rows, query) {
   const brokers = Object.entries(brokerMap)
     .sort((a,b) => b[1].date.localeCompare(a[1].date));
 
+  // ── 컨센서스 평균 계산 (3단계 보정) ──────────────
+  const now3m = new Date();
+  now3m.setMonth(now3m.getMonth() - 3);
+
+  // 1단계: 가중치 부여 (3개월 이내 1.0, 이상 0.5)
+  const weighted = brokers.map(([broker, v]) => {
+    let w = 1.0;
+    try {
+      const ds = v.date.replace(/\./g, "-");
+      const d  = new Date(ds.length <= 8 ? `20${ds}` : ds);
+      if (d < now3m) w = 0.5;
+    } catch {}
+    return { broker, price: v.price, weight: w };
+  }).filter(v => v.price > 0);
+
+  // 2단계: 가중평균 1차 계산
+  const wSum   = weighted.reduce((a,v) => a + v.weight, 0);
+  const wAvg1  = wSum > 0
+    ? weighted.reduce((a,v) => a + v.price * v.weight, 0) / wSum
+    : 0;
+
+  // 3단계: 이상치 제거 (1차 가중평균 ±30% 초과 제거)
+  const filtered = weighted.filter(v =>
+    wAvg1 === 0 || (v.price >= wAvg1 * 0.7 && v.price <= wAvg1 * 1.3)
+  );
+
+  // 최종 가중평균
+  const fwSum = filtered.reduce((a,v) => a + v.weight, 0);
+  const avg   = fwSum > 0
+    ? Math.round(filtered.reduce((a,v) => a + v.price * v.weight, 0) / fwSum)
+    : 0;
+
+  // 제거된 이상치 목록
+  const outliers = weighted.filter(v =>
+    wAvg1 > 0 && (v.price < wAvg1 * 0.7 || v.price > wAvg1 * 1.3)
+  );
+
   const prices = brokers.map(([,v]) => v.price);
-  const avg = prices.length ? Math.round(prices.reduce((a,b)=>a+b,0)/prices.length) : 0;
   const max = prices.length ? Math.max(...prices) : 0;
   const min = prices.length ? Math.min(...prices) : 0;
 
@@ -459,7 +496,8 @@ function processData(rows, query) {
     .sort((a,b) => a.date.localeCompare(b.date));
 
   return { name: stockName, ticker: stockTicker, sector: stockSector,
-           count: matched.length, brokers, avg, max, min, trend };
+           count: matched.length, brokers, avg, max, min, trend,
+           outliers, wAvg1: Math.round(wAvg1) };
 }
 
 function renderResult(d) {
@@ -548,6 +586,12 @@ function renderResult(d) {
         <tbody>${brokerRows}</tbody>
       </table>
     </div>
+    ${d.outliers && d.outliers.length > 0 ? `
+    <div style="margin-top:12px;padding:12px 16px;background:rgba(255,82,82,0.06);
+      border:1px solid rgba(255,82,82,0.15);border-radius:8px;font-size:0.8rem;color:var(--muted)">
+      ⚠️ 컨센서스 평균에서 제외된 이상치:
+      ${d.outliers.map(o => `<span style="color:var(--down);margin-left:8px">${o.broker} ${o.price.toLocaleString()}원</span>`).join("")}
+    </div>` : ""}
   `;
 
   el.style.display = "block";
