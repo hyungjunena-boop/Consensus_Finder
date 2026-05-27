@@ -760,6 +760,18 @@ function processStock(query) {
       brokerMap[b] = { date: d, price: p, opinion: r["opinion"] };
   });
 
+  // changes에서 증권사별 직전 목표가 조회
+  const changeMap = {};
+  changesData.filter(r => r["name"] === name).forEach(r => {
+    const b    = r["broker"];
+    const prev = Number(String(r["이전_목표가"] || "0").replace(/,/g,"")) || 0;
+    const next = Number(String(r["신규_목표가"] || "0").replace(/,/g,"")) || 0;
+    const d    = r["date"];
+    if (!prev || !next) return;
+    if (!changeMap[b] || d > changeMap[b].date)
+      changeMap[b] = { date: d, prev, next };
+  });
+
   const brokers = Object.entries(brokerMap).sort((a,b) => b[1].date.localeCompare(a[1].date));
   const prices  = brokers.map(([,v]) => v.price);
   const avg     = prices.length ? Math.round(prices.reduce((a,b)=>a+b,0)/prices.length) : 0;
@@ -774,21 +786,37 @@ function processStock(query) {
     brokers, avg,
     max: prices.length ? Math.max(...prices) : 0,
     min: prices.length ? Math.min(...prices) : 0,
-    trend, outliers: [],
+    trend, outliers: [], changeMap,
   };
 }
 
 // ── 종목 결과 렌더링 ─────────────────────────
 function renderStock(d) {
   const brokerRows = d.brokers.map(([broker, v]) => {
-    const op    = v.opinion && v.opinion !== "N/A" ? v.opinion : "";
+    const op     = v.opinion && v.opinion !== "N/A" ? v.opinion : "";
     const opHtml = op
-      ? `<span class="badge ${op.includes('매수')||op.includes('Buy') ? 'badge-buy':'badge-neutral'}">${op}</span>`
+      ? `<span class="badge ${op.includes('매수')||op.includes('Buy')||op.includes('Strong') ? 'badge-buy':'badge-neutral'}">${op}</span>`
       : `<span class="td-muted">-</span>`;
+
+    // 직전 목표가 대비 변화
+    let changeHtml = `<span class="td-muted">-</span>`;
+    const ch = d.changeMap[broker];
+    if (ch) {
+      const diff = ch.next - ch.prev;
+      const pct  = Math.round((diff / ch.prev) * 1000) / 10;
+      const sign = diff >= 0 ? "+" : "";
+      const cls  = diff >= 0 ? "td-up" : "td-down";
+      changeHtml = `<span class="${cls}" style="font-family:'JetBrains Mono',monospace;font-size:0.82rem">
+        ${sign}${diff.toLocaleString()}원<br>
+        <span style="font-size:0.75rem">${sign}${pct}%</span>
+      </span>`;
+    }
+
     return `<tr>
       <td>${broker}</td>
       <td class="td-mono">${v.price.toLocaleString()}원</td>
       <td class="td-muted">${v.date}</td>
+      <td>${changeHtml}</td>
       <td>${opHtml}</td>
     </tr>`;
   }).join("");
@@ -835,7 +863,7 @@ function renderStock(d) {
 
     <div class="card">
       <table class="tbl">
-        <thead><tr><th>증권사</th><th>최신 목표가</th><th>날짜</th><th>투자의견</th></tr></thead>
+        <thead><tr><th>증권사</th><th>최신 목표가</th><th>날짜</th><th>직전 대비</th><th>투자의견</th></tr></thead>
         <tbody>${brokerRows}</tbody>
       </table>
     </div>
